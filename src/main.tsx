@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 /**
  * Quiz & Assessment Web App — Single-file React MVP
@@ -18,7 +18,38 @@ import React, { useEffect, useMemo, useState } from "react";
 const uid = () => Math.random().toString(36).slice(2, 10);
 const now = () => new Date().toISOString();
 
-function downloadFile(filename, text) {
+// Types
+type MCQQuestion = { id: string; type: 'mcq'; prompt: string; options: string[]; correct: number; points: number };
+type FIBQuestion = { id: string; type: 'fib'; prompt: string; answer: string; points: number };
+type MatchPair = { left: string; right: string };
+type MatchSelection = { left: string; right: string | null };
+type MatchQuestion = { id: string; type: 'match'; prompt: string; pairs: MatchPair[]; points: number };
+type Question = MCQQuestion | FIBQuestion | MatchQuestion;
+
+type Quiz = { id: string; title: string; durationSec: number; questions: Question[] };
+
+type Player = { id: string; name: string; score: number; joinedAt: string };
+
+type AnswerValue = number | string | MatchSelection[] | null;
+type AnswerRecord = { playerId: string; qIndex: number; answer: AnswerValue; isCorrect: boolean; at: string };
+
+type Room = { quiz: Quiz; players: Record<string, Player>; answers: AnswerRecord[]; currentIndex: number; status: 'lobby' | 'running' | 'ended'; createdAt: string };
+
+type RoomEventMap = { players: Player[]; state: Room; answer: AnswerRecord };
+
+interface Adapter {
+  createRoom(quiz: Quiz): Promise<{ roomCode: string }>;
+  joinRoom(roomCode: string, name: string): Promise<{ playerId: string; snapshot: Room }>;
+  on<K extends keyof RoomEventMap>(roomCode: string, event: K, cb: (payload: RoomEventMap[K]) => void): () => void;
+  startQuiz(roomCode: string): Promise<void>;
+  nextQuestion(roomCode: string): Promise<void>;
+  submitAnswer(roomCode: string, playerId: string, payload: { answer: AnswerValue }): Promise<{ isCorrect: boolean }>;
+  getRoomSnapshot(roomCode: string): Promise<Room>;
+}
+
+type CSVRow = Record<string, string | number | boolean | null | undefined>;
+
+function downloadFile(filename: string, text: string) {
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -28,9 +59,9 @@ function downloadFile(filename, text) {
   URL.revokeObjectURL(url);
 }
 
-function toCSV(rows) {
+function toCSV(rows: CSVRow[]): string {
   if (!rows || rows.length === 0) return "";
-  const esc = (s = "") => `"${String(s).replaceAll('"', '""')}"`;
+  const esc = (s: unknown = "") => `"${String(s).replaceAll('"', '""')}"`;
   const keys = Object.keys(rows[0] || {});
   const head = keys.map(esc).join(",");
   const data = rows.map(r => keys.map(k => esc(r[k])).join(",")).join("\n");
@@ -40,46 +71,50 @@ function toCSV(rows) {
 // ------------------------------
 // Local realtime adapter (in-memory)
 // ------------------------------
-function LocalAdapter() {
-  const state = { rooms: {} };
-  const listeners = {};
-  const emitAll = (room, evt, payload) => (listeners[room]?.[evt] || []).forEach(cb => cb(payload));
+function LocalAdapter(): Adapter {
+  const state: { rooms: Record<string, Room> } = { rooms: {} };
+  const listeners: Record<string, { [K in keyof RoomEventMap]?: Array<(payload: RoomEventMap[K]) => void> }> = {};
+  const emitAll = <K extends keyof RoomEventMap>(room: string, evt: K, payload: RoomEventMap[K]) => (listeners[room]?.[evt] || []).forEach(cb => cb(payload));
 
   return {
-    createRoom: async (quiz) => {
+    createRoom: async (quiz: Quiz) => {
       const roomCode = String(Math.random()).slice(2, 8);
       state.rooms[roomCode] = { quiz, players: {}, answers: [], currentIndex: 0, status: "lobby", createdAt: now() };
       return { roomCode };
     },
-    joinRoom: async (roomCode, name) => {
+    joinRoom: async (roomCode: string, name: string) => {
       const room = state.rooms[roomCode];
       if (!room) throw new Error("Room not found");
       const id = uid();
       room.players[id] = { id, name, score: 0, joinedAt: now() };
       emitAll(roomCode, "players", Object.values(room.players));
-      return { playerId: id, snapshot: JSON.parse(JSON.stringify(room)) };
+      return { playerId: id, snapshot: JSON.parse(JSON.stringify(room)) as Room };
     },
-    on: (roomCode, event, cb) => {
+    on: <K extends keyof RoomEventMap>(roomCode: string, event: K, cb: (payload: RoomEventMap[K]) => void) => {
       listeners[roomCode] = listeners[roomCode] || {};
-      listeners[roomCode][event] = listeners[roomCode][event] || [];
-      listeners[roomCode][event].push(cb);
-      return () => { listeners[roomCode][event] = (listeners[roomCode][event] || []).filter(f => f !== cb); };
+      const arr = (listeners[roomCode][event] || []) as Array<(payload: RoomEventMap[K]) => void>;
+      arr.push(cb);
+      listeners[roomCode][event] = arr as any;
+      return () => {
+        const list = (listeners[roomCode][event] || []) as Array<(payload: RoomEventMap[K]) => void>;
+        listeners[roomCode][event] = list.filter(f => f !== cb) as any;
+      };
     },
-    startQuiz: async (roomCode) => {
+    startQuiz: async (roomCode: string) => {
       const room = state.rooms[roomCode];
       if (!room) return;
       room.status = "running";
       room.currentIndex = 0;
-      emitAll(roomCode, "state", JSON.parse(JSON.stringify(room)));
+      emitAll(roomCode, "state", JSON.parse(JSON.stringify(room)) as Room);
     },
-    nextQuestion: async (roomCode) => {
+    nextQuestion: async (roomCode: string) => {
       const room = state.rooms[roomCode];
       if (!room) return;
       room.currentIndex += 1;
       if (room.currentIndex >= (room.quiz?.questions?.length || 0)) room.status = "ended";
-      emitAll(roomCode, "state", JSON.parse(JSON.stringify(room)));
+      emitAll(roomCode, "state", JSON.parse(JSON.stringify(room)) as Room);
     },
-    submitAnswer: async (roomCode, playerId, payload) => {
+    submitAnswer: async (roomCode: string, playerId: string, payload: { answer: AnswerValue }) => {
       const room = state.rooms[roomCode];
       if (!room) return { isCorrect: false };
       const q = room.quiz.questions[room.currentIndex];
@@ -88,15 +123,15 @@ function LocalAdapter() {
         room.players[playerId].score = (room.players[playerId].score || 0) + 1;
         emitAll(roomCode, "players", Object.values(room.players));
       }
-      const record = { playerId, qIndex: room.currentIndex, answer: payload.answer, isCorrect, at: now() };
+      const record: AnswerRecord = { playerId, qIndex: room.currentIndex, answer: payload.answer, isCorrect, at: now() };
       room.answers.push(record);
       emitAll(roomCode, "answer", record);
       return { isCorrect };
     },
-    getRoomSnapshot: async (roomCode) => {
+    getRoomSnapshot: async (roomCode: string) => {
       const room = state.rooms[roomCode];
       if (!room) throw new Error("Room not found");
-      return JSON.parse(JSON.stringify(room));
+      return JSON.parse(JSON.stringify(room)) as Room;
     }
   };
 }
@@ -104,7 +139,7 @@ function LocalAdapter() {
 // ------------------------------
 // Quiz logic
 // ------------------------------
-const defaultQuiz = () => ({
+const defaultQuiz = (): Quiz => ({
   id: uid(),
   title: "Sample Quiz",
   durationSec: 30,
@@ -115,15 +150,17 @@ const defaultQuiz = () => ({
   ]
 });
 
-function gradeAnswer(q, answer) {
+function gradeAnswer(q: Question, answer: AnswerValue): boolean {
   if (!q) return false;
   switch (q.type) {
     case "mcq": return Number(answer) === q.correct;
-    case "fib": return String(answer || "").trim().toLowerCase() === String(q.answer || "").trim().toLowerCase();
-    case "match":
+    case "fib": return String((answer ?? "")).trim().toLowerCase() === String(q.answer || "").trim().toLowerCase();
+    case "match": {
       if (!Array.isArray(answer)) return false;
-      const ok = answer.every(p => q.pairs.find(x => x.left === p.left && x.right === p.right));
-      return ok && answer.length === q.pairs.length;
+      const arr = answer as MatchSelection[];
+      const ok = arr.every(p => q.pairs.find(x => x.left === p.left && x.right === p.right));
+      return ok && arr.length === q.pairs.length;
+    }
     default: return false;
   }
 }
@@ -131,7 +168,7 @@ function gradeAnswer(q, answer) {
 // ------------------------------
 // UI components
 // ------------------------------
-function Section({ title, children, right }) {
+function Section({ title, children, right }: { title: ReactNode; children?: ReactNode; right?: ReactNode }) {
   return (
     <div className="bg-white rounded-2xl shadow p-5 mb-4">
       <div className="flex items-center justify-between mb-3">
@@ -143,14 +180,14 @@ function Section({ title, children, right }) {
   );
 }
 
-function Pill({ children }) { return <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100">{children}</span>; }
+function Pill({ children }: { children?: ReactNode }) { return <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100">{children}</span>; }
 
-function Timer({ seconds, onEnd, tickKey }) {
+function Timer({ seconds, onEnd, tickKey }: { seconds?: number; onEnd?: () => void; tickKey?: string | number }) {
   const [left, setLeft] = useState(seconds || 0);
   useEffect(() => { setLeft(seconds || 0); }, [seconds, tickKey]);
   useEffect(() => {
     if (left <= 0) return void onEnd?.();
-    const t = setTimeout(() => setLeft(l => l - 1), 1000);
+    const t = setTimeout(() => setLeft((l: number) => l - 1), 1000);
     return () => clearTimeout(t);
   }, [left]);
   const pct = seconds ? Math.max(0, Math.min(100, (left / seconds) * 100)) : 0;
@@ -164,7 +201,7 @@ function Timer({ seconds, onEnd, tickKey }) {
   );
 }
 
-function Leaderboard({ players = [] }) {
+function Leaderboard({ players = [] }: { players?: Player[] }) {
   const sorted = [...players].sort((a,b) => (b.score || 0) - (a.score || 0));
   return (
     <div className="space-y-2">
@@ -178,8 +215,8 @@ function Leaderboard({ players = [] }) {
   );
 }
 
-function QuestionEditor({ q, onChange, onDelete }) {
-  const set = (patch) => onChange({ ...q, ...patch });
+function QuestionEditor({ q, onChange, onDelete }: { q: Question; onChange: (q: Question) => void; onDelete: () => void }) {
+  const set = (patch: Partial<Question>) => onChange({ ...q, ...(patch as any) } as Question);
   return (
     <div className="border rounded-2xl p-4 mb-3">
       <div className="flex items-center justify-between mb-2">
@@ -192,15 +229,15 @@ function QuestionEditor({ q, onChange, onDelete }) {
 
       {q.type === "mcq" && (
         <div className="space-y-2">
-          {q.options.map((opt, i) => (
+          {(q.options).map((opt, i) => (
             <div key={i} className="flex items-center gap-2">
-              <input className="flex-1 border rounded p-2" value={opt} onChange={e => { const options = [...q.options]; options[i] = e.target.value; set({ options }); }} />
-              <label className="text-sm flex items-center gap-1"><input type="radio" name={`correct-${q.id}`} checked={q.correct === i} onChange={() => set({ correct: i })} /> Correct</label>
+              <input className="flex-1 border rounded p-2" value={opt} onChange={e => { const options = [...q.options]; options[i] = e.target.value; set({ options } as Partial<MCQQuestion>); }} />
+              <label className="text-sm flex items-center gap-1"><input type="radio" name={`correct-${q.id}`} checked={q.correct === i} onChange={() => set({ correct: i } as Partial<MCQQuestion>)} /> Correct</label>
             </div>
           ))}
           <div className="flex gap-2">
-            <button className="text-sm px-2 py-1 border rounded" onClick={() => set({ options: [...q.options, ""] })}>Add option</button>
-            {q.options.length > 2 && <button className="text-sm px-2 py-1 border rounded" onClick={() => set({ options: q.options.slice(0, -1) })}>Remove last</button>}
+            <button className="text-sm px-2 py-1 border rounded" onClick={() => set({ options: [...q.options, ""] } as Partial<MCQQuestion>)}>Add option</button>
+            {q.options.length > 2 && <button className="text-sm px-2 py-1 border rounded" onClick={() => set({ options: q.options.slice(0, -1) } as Partial<MCQQuestion>)}>Remove last</button>}
           </div>
         </div>
       )}
@@ -208,7 +245,7 @@ function QuestionEditor({ q, onChange, onDelete }) {
       {q.type === "fib" && (
         <div>
           <label className="block text-sm mb-1">Correct Answer</label>
-          <input className="w-full border rounded p-2" value={q.answer} onChange={e => set({ answer: e.target.value })} />
+          <input className="w-full border rounded p-2" value={q.answer} onChange={e => set({ answer: e.target.value } as Partial<FIBQuestion>)} />
         </div>
       )}
 
@@ -217,29 +254,29 @@ function QuestionEditor({ q, onChange, onDelete }) {
           <div>
             <div className="text-sm font-medium mb-1">Left (fixed)</div>
             {q.pairs.map((p, i) => (
-              <input key={i} className="w-full border rounded p-2 mb-2" value={p.left} onChange={e => { const pairs = [...q.pairs]; pairs[i] = { ...pairs[i], left: e.target.value }; set({ pairs }); }} />
+              <input key={i} className="w-full border rounded p-2 mb-2" value={p.left} onChange={e => { const pairs = [...q.pairs]; pairs[i] = { ...pairs[i], left: e.target.value }; set({ pairs } as Partial<MatchQuestion>); }} />
             ))}
           </div>
           <div>
             <div className="text-sm font-medium mb-1">Right (drag targets)</div>
             {q.pairs.map((p, i) => (
-              <input key={i} className="w-full border rounded p-2 mb-2" value={p.right} onChange={e => { const pairs = [...q.pairs]; pairs[i] = { ...pairs[i], right: e.target.value }; set({ pairs }); }} />
+              <input key={i} className="w-full border rounded p-2 mb-2" value={p.right} onChange={e => { const pairs = [...q.pairs]; pairs[i] = { ...pairs[i], right: e.target.value }; set({ pairs } as Partial<MatchQuestion>); }} />
             ))}
           </div>
-          <div className="col-span-full"><button className="text-sm px-2 py-1 border rounded" onClick={() => set({ pairs: [...q.pairs, { left: "", right: "" }] })}>Add pair</button></div>
+          <div className="col-span-full"><button className="text-sm px-2 py-1 border rounded" onClick={() => set({ pairs: [...q.pairs, { left: "", right: "" }] } as Partial<MatchQuestion>)}>Add pair</button></div>
         </div>
       )}
 
       <div className="mt-3 flex items-center gap-3">
         <label className="text-sm">Points</label>
-        <input type="number" className="w-24 border rounded p-2" value={q.points || 1} onChange={e => set({ points: Number(e.target.value || 0) })} />
+        <input type="number" className="w-24 border rounded p-2" value={q.points || 1} onChange={e => set({ points: Number(e.target.value || 0) } as Partial<Question>)} />
       </div>
     </div>
   );
 }
 
-function QuestionPlayer({ q, onSubmit, disabled }) {
-  const [answer, setAnswer] = useState(null);
+function QuestionPlayer({ q, onSubmit, disabled }: { q?: Question; onSubmit: (ans: AnswerValue) => void; disabled?: boolean }) {
+  const [answer, setAnswer] = useState<AnswerValue | null>(null);
   useEffect(() => { setAnswer(null); }, [q?.id]);
   if (!q) return <div>No question</div>;
   const submit = () => onSubmit?.(answer);
@@ -260,11 +297,11 @@ function QuestionPlayer({ q, onSubmit, disabled }) {
       )}
 
       {q.type === "fib" && (
-        <input className="w-full border rounded-xl p-2" placeholder="Type your answer" value={answer || ""} onChange={e => setAnswer(e.target.value)} />
+        <input className="w-full border rounded-xl p-2" placeholder="Type your answer" value={(answer as string) || ""} onChange={e => setAnswer(e.target.value)} />
       )}
 
       {q.type === "match" && (
-        <MatchPlayer pairs={q.pairs} onChange={setAnswer} />
+        <MatchPlayer pairs={q.pairs} onChange={(pairs) => setAnswer(pairs)} />
       )}
 
       <div className="mt-4"><button disabled={disabled} className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50" onClick={submit}>Submit</button></div>
@@ -272,11 +309,11 @@ function QuestionPlayer({ q, onSubmit, disabled }) {
   );
 }
 
-function MatchPlayer({ pairs, onChange }) {
-  const [right, setRight] = useState(() => shuffle(pairs.map(p => p.right)));
-  const [mapping, setMapping] = useState(pairs.map(p => ({ left: p.left, right: null })));
+function MatchPlayer({ pairs, onChange }: { pairs: MatchPair[]; onChange?: (pairs: MatchSelection[]) => void }) {
+  const [right] = useState<string[]>(() => shuffle(pairs.map(p => p.right)));
+  const [mapping, setMapping] = useState<MatchSelection[]>(pairs.map(p => ({ left: p.left, right: null })));
   useEffect(() => { onChange?.(mapping); }, [mapping]);
-  function onDrop(i, value) { setMapping(m => m.map((x, idx) => idx === i ? { ...x, right: value } : x)); }
+  function onDrop(i: number, value: string) { setMapping(m => m.map((x, idx) => idx === i ? { ...x, right: value } : x)); }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -299,14 +336,14 @@ function MatchPlayer({ pairs, onChange }) {
   );
 }
 
-function shuffle(a) { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; }
+function shuffle<T>(a: T[]): T[] { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; }
 
 // ------------------------------
 // Main App
 // ------------------------------
 export default function QuizApp() {
   const [role, setRole] = useState("teacher");
-  const [adapter] = useState(() => LocalAdapter());
+  const [adapter] = useState<Adapter>(() => LocalAdapter());
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 text-gray-900 p-4 md:p-8">
@@ -333,13 +370,13 @@ export default function QuizApp() {
 // ------------------------------
 // TeacherView
 // ------------------------------
-function TeacherView({ adapter }) {
-  const [quiz, setQuiz] = useState(defaultQuiz());
+function TeacherView({ adapter }: { adapter: Adapter }) {
+  const [quiz, setQuiz] = useState<Quiz>(defaultQuiz());
   const [roomCode, setRoomCode] = useState("");
-  const [players, setPlayers] = useState([]);
-  const [state, setState] = useState(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [state, setState] = useState<Room | null>(null);
   const [tick, setTick] = useState(0);
-  const [lastAnswer, setLastAnswer] = useState(null);
+  const [lastAnswer, setLastAnswer] = useState<AnswerRecord | null>(null);
 
   const currentQ = useMemo(() => state?.quiz?.questions?.[state?.currentIndex ?? 0], [state]);
 
@@ -351,8 +388,8 @@ function TeacherView({ adapter }) {
     return () => { off1?.(); off2?.(); off3?.(); };
   }, [roomCode]);
 
-  const addQuestion = (type) => {
-    const q = type === "mcq" ? { id: uid(), type, prompt: "", options: ["",""], correct: 0, points: 1 }
+  const addQuestion = (type: Question['type']) => {
+    const q: Question = type === "mcq" ? { id: uid(), type, prompt: "", options: ["",""], correct: 0, points: 1 }
       : type === "fib" ? { id: uid(), type, prompt: "", answer: "", points: 1 }
       : { id: uid(), type: "match", prompt: "", pairs: [{ left: "", right: "" }], points: 1 };
     setQuiz(qz => ({ ...qz, questions: [...qz.questions, q] }));
@@ -363,7 +400,18 @@ function TeacherView({ adapter }) {
   const nextQuestion = async () => { await adapter.nextQuestion(roomCode); setTick(t => t + 1); };
 
   const exportCSV = () => {
-    const rows = (state?.answers || []).map(a => ({ room: roomCode, playerId: a.playerId, player: (players.find(p => p.id === a.playerId) || {}).name || "", questionIndex: a.qIndex + 1, correct: a.isCorrect ? "YES" : "NO", answer: typeof a.answer === 'object' ? JSON.stringify(a.answer) : a.answer, at: a.at }));
+    const rows: CSVRow[] = (state?.answers || []).map(a => {
+      const player = players.find(p => p.id === a.playerId);
+      return {
+        room: roomCode,
+        playerId: a.playerId,
+        player: player?.name ?? "",
+        questionIndex: a.qIndex + 1,
+        correct: a.isCorrect ? "YES" : "NO",
+        answer: typeof a.answer === 'object' ? JSON.stringify(a.answer) : (a.answer as string | number | boolean | null | undefined),
+        at: a.at
+      };
+    });
     downloadFile(`results-${roomCode}.csv`, toCSV(rows));
   };
 
@@ -371,7 +419,7 @@ function TeacherView({ adapter }) {
     try {
       const { jsPDF } = await import("jspdf");
       const doc = new jsPDF(); doc.setFontSize(14); doc.text(`Quiz Results — Room ${roomCode}`, 14, 18); doc.setFontSize(10);
-      let y = 26; (state?.answers || []).slice(0, 200).forEach((a, idx) => { const name = (players.find(p => p.id === a.playerId) || {}).name || a.playerId; const line = `${idx+1}. Q${a.qIndex+1} • ${name} • ${a.isCorrect ? '✓' : '✗'} • ${typeof a.answer === 'object' ? JSON.stringify(a.answer) : a.answer}`; doc.text(line.slice(0, 100), 14, y); y += 6; if (y > 280) { doc.addPage(); y = 20; } });
+      let y = 26; (state?.answers || []).slice(0, 200).forEach((a, idx) => { const name = (players.find(p => p.id === a.playerId) || undefined)?.name || a.playerId; const line = `${idx+1}. Q${a.qIndex+1} • ${name} • ${a.isCorrect ? '✓' : '✗'} • ${typeof a.answer === 'object' ? JSON.stringify(a.answer) : a.answer}`; doc.text(line.slice(0, 100), 14, y); y += 6; if (y > 280) { doc.addPage(); y = 20; } });
       doc.save(`results-${roomCode}.pdf`);
     } catch (e) { alert("jsPDF not available. Add it to your project or use CSV export."); }
   };
@@ -390,7 +438,7 @@ function TeacherView({ adapter }) {
               <input type="number" className="w-full border rounded-xl p-2" value={quiz.durationSec} onChange={e => setQuiz({ ...quiz, durationSec: Number(e.target.value || 0) })} />
             </div>
           </div>
-          {quiz.questions.map(q => <QuestionEditor key={q.id} q={q} onChange={nq => setQuiz(qz => ({ ...qz, questions: qz.questions.map(x => x.id === q.id ? nq : x) }))} onDelete={() => setQuiz(qz => ({ ...qz, questions: qz.questions.filter(x => x.id !== q.id) }))} />)}
+          {quiz.questions.map(q => <QuestionEditor key={q.id} q={q} onChange={(nq: Question) => setQuiz(qz => ({ ...qz, questions: qz.questions.map(x => x.id === q.id ? nq : x) }))} onDelete={() => setQuiz(qz => ({ ...qz, questions: qz.questions.filter(x => x.id !== q.id) }))} />)}
           <div className="flex gap-2">
             <button className="px-3 py-1.5 border rounded-xl" onClick={() => addQuestion("mcq")}>Add MCQ</button>
             <button className="px-3 py-1.5 border rounded-xl" onClick={() => addQuestion("fib")}>Add Fill-in-Blank</button>
@@ -425,7 +473,10 @@ function TeacherView({ adapter }) {
                   </div>
                   <div>
                     <div className="text-sm font-medium mb-2">Answers Stream</div>
-                    <div className="h-64 overflow-auto border rounded-xl p-2 bg-gray-50">{(state?.answers || []).slice().reverse().map((a, idx) => (<div key={idx} className="text-sm flex items-center justify-between"><span>{(players.find(p => p.id === a.playerId) || {}).name || a.playerId}</span><span>Q{a.qIndex+1}</span><span>{a.isCorrect ? "✓" : "✗"}</span></div>))}</div>
+                    <div className="h-64 overflow-auto border rounded-xl p-2 bg-gray-50">{(state?.answers || []).slice().reverse().map((a, idx) => {
+                      const player = players.find(p => p.id === a.playerId);
+                      return (<div key={idx} className="text-sm flex items-center justify-between"><span>{player?.name ?? a.playerId}</span><span>Q{a.qIndex+1}</span><span>{a.isCorrect ? "✓" : "✗"}</span></div>);
+                    })}</div>
                   </div>
                 </div>
               )}
@@ -443,7 +494,7 @@ function TeacherView({ adapter }) {
           <Leaderboard players={players} />
         </Section>
 
-        <Section title="Latest Answer">{lastAnswer ? (<div className="text-sm">{(players.find(p => p.id === lastAnswer.playerId) || {}).name || lastAnswer.playerId} • Q{lastAnswer.qIndex+1} • {lastAnswer.isCorrect ? "Correct" : "Wrong"}</div>) : (<div className="text-sm text-gray-500">No answers yet.</div>)}</Section>
+        <Section title="Latest Answer">{lastAnswer ? (<div className="text-sm">{(players.find(p => p.id === lastAnswer.playerId) || undefined)?.name || lastAnswer.playerId} • Q{lastAnswer.qIndex+1} • {lastAnswer.isCorrect ? "Correct" : "Wrong"}</div>) : (<div className="text-sm text-gray-500">No answers yet.</div>)}</Section>
       </div>
     </div>
   );
@@ -452,14 +503,14 @@ function TeacherView({ adapter }) {
 // ------------------------------
 // StudentView
 // ------------------------------
-function StudentView({ adapter }) {
+function StudentView({ adapter }: { adapter: Adapter }) {
   const [roomCode, setRoomCode] = useState("");
   const [name, setName] = useState("");
   const [joined, setJoined] = useState(false);
-  const [playerId, setPlayerId] = useState(null);
-  const [state, setState] = useState(null);
-  const [players, setPlayers] = useState([]);
-  const [feedback, setFeedback] = useState(null);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [state, setState] = useState<Room | null>(null);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [feedback, setFeedback] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   const currentQ = useMemo(() => state?.quiz?.questions?.[state?.currentIndex ?? 0], [state]);
@@ -478,13 +529,13 @@ function StudentView({ adapter }) {
       setPlayerId(playerId);
       setState(snapshot);
       setJoined(true);
-    } catch (e) {
-      alert(e.message || e);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : String(e));
     }
   };
 
-  const submit = async (ans) => {
-    const res = await adapter.submitAnswer(roomCode, playerId, { answer: ans });
+  const submit = async (ans: AnswerValue) => {
+    const res = await adapter.submitAnswer(roomCode, playerId as string, { answer: ans });
     setFeedback(res.isCorrect ? "Correct!" : "Wrong");
     setTick(t => t + 1);
     setTimeout(() => setFeedback(null), 1500);
@@ -535,16 +586,16 @@ function StudentView({ adapter }) {
 // ------------------------------
 (function runGradeAnswerTests(){
   try {
-    const mcq = { type: 'mcq', correct: 2 };
+    const mcq: MCQQuestion = { id: '1', type: 'mcq', prompt: '', options: [], correct: 2, points: 1 };
     console.assert(gradeAnswer(mcq, 2) === true, 'MCQ correct should be true');
     console.assert(gradeAnswer(mcq, 1) === false, 'MCQ wrong should be false');
 
-    const fib = { type: 'fib', answer: 'H2O' };
+    const fib: FIBQuestion = { id: '2', type: 'fib', prompt: '', answer: 'H2O', points: 1 };
     console.assert(gradeAnswer(fib, 'H2O') === true, 'FIB exact');
     console.assert(gradeAnswer(fib, 'h2o') === true, 'FIB case-insensitive');
     console.assert(gradeAnswer(fib, ' H2O ') === true, 'FIB trimmed');
 
-    const matchQ = { type: 'match', pairs: [{left:'A',right:'1'},{left:'B',right:'2'}] };
+    const matchQ: MatchQuestion = { id: '3', type: 'match', prompt: '', pairs: [{left:'A',right:'1'},{left:'B',right:'2'}], points: 1 };
     console.assert(gradeAnswer(matchQ, [{left:'A',right:'1'},{left:'B',right:'2'}]) === true, 'MATCH correct');
     console.assert(gradeAnswer(matchQ, [{left:'A',right:'2'},{left:'B',right:'1'}]) === false, 'MATCH wrong');
 
