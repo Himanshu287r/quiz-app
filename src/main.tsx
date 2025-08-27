@@ -182,13 +182,13 @@ function gradeAnswer(q: Question, answer: AnswerValue): boolean {
 // ------------------------------
 function Section({ title, children, right }: { title: ReactNode; children?: ReactNode; right?: ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow p-5 mb-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xl font-semibold">{title}</h2>
+    <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
         <div>{right}</div>
       </div>
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -218,7 +218,7 @@ function Leaderboard({ players = [] }: { players?: Player[] }) {
   return (
     <div className="space-y-2">
       {sorted.map((p, i) => (
-        <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-xl p-2">
+        <div key={p.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-2">
           <div className="flex items-center gap-2"><span className="text-sm w-6 text-center">#{i+1}</span><span className="font-medium">{p.name}</span></div>
           <div className="text-sm"><b>{p.score || 0}</b> pts</div>
         </div>
@@ -248,8 +248,8 @@ function QuestionEditor({ q, onChange, onDelete }: { q: Question; onChange: (q: 
             </div>
           ))}
           <div className="flex gap-2">
-            <button className="text-sm px-2 py-1 border rounded" onClick={() => set({ options: [...q.options, ""] } as Partial<MCQQuestion>)}>Add option</button>
-            {q.options.length > 2 && <button className="text-sm px-2 py-1 border rounded" onClick={() => set({ options: q.options.slice(0, -1) } as Partial<MCQQuestion>)}>Remove last</button>}
+            <button className="text-sm px-2 py-1 rounded border hover:bg-slate-50" onClick={() => set({ options: [...q.options, ""] } as Partial<MCQQuestion>)}>Add option</button>
+            {q.options.length > 2 && <button className="text-sm px-2 py-1 rounded border hover:bg-slate-50" onClick={() => set({ options: q.options.slice(0, -1) } as Partial<MCQQuestion>)}>Remove last</button>}
           </div>
         </div>
       )}
@@ -275,7 +275,7 @@ function QuestionEditor({ q, onChange, onDelete }: { q: Question; onChange: (q: 
               <input key={i} className="w-full border rounded p-2 mb-2" value={p.right} onChange={e => { const pairs = [...q.pairs]; pairs[i] = { ...pairs[i], right: e.target.value }; set({ pairs } as Partial<MatchQuestion>); }} />
             ))}
           </div>
-          <div className="col-span-full"><button className="text-sm px-2 py-1 border rounded" onClick={() => set({ pairs: [...q.pairs, { left: "", right: "" }] } as Partial<MatchQuestion>)}>Add pair</button></div>
+          <div className="col-span-full"><button className="text-sm px-2 py-1 rounded border hover:bg-slate-50" onClick={() => set({ pairs: [...q.pairs, { left: "", right: "" }] } as Partial<MatchQuestion>)}>Add pair</button></div>
         </div>
       )}
 
@@ -300,7 +300,7 @@ function QuestionPlayer({ q, onSubmit, disabled }: { q?: Question; onSubmit: (an
       {q.type === "mcq" && (
         <div className="space-y-2">
           {q.options.map((opt, i) => (
-            <label key={i} className={`flex items-center gap-2 border rounded-xl p-2 ${Number(answer) === i ? "ring-2" : ""}`}>
+            <label key={i} className={`flex items-center gap-2 rounded-xl border p-2 transition-shadow ${Number(answer) === i ? "ring-2 ring-slate-400" : "hover:shadow-sm"}`}>
               <input type="radio" name={`a-${q.id}`} checked={Number(answer) === i} onChange={() => setAnswer(i)} />
               <span>{opt}</span>
             </label>
@@ -309,14 +309,14 @@ function QuestionPlayer({ q, onSubmit, disabled }: { q?: Question; onSubmit: (an
       )}
 
       {q.type === "fib" && (
-        <input className="w-full border rounded-xl p-2" placeholder="Type your answer" value={(answer as string) || ""} onChange={e => setAnswer(e.target.value)} />
+        <input className="w-full rounded-xl border p-2 focus:outline-none focus:ring focus:ring-slate-300" placeholder="Type your answer" value={(answer as string) || ""} onChange={e => setAnswer(e.target.value)} />
       )}
 
       {q.type === "match" && (
         <MatchPlayer pairs={q.pairs} onChange={(pairs) => setAnswer(pairs)} />
       )}
 
-      <div className="mt-4"><button disabled={disabled} className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50" onClick={submit}>Submit</button></div>
+      <div className="mt-4"><button disabled={disabled} className="rounded-xl bg-black px-4 py-2 text-white transition-opacity hover:opacity-90 disabled:opacity-50" onClick={submit}>Submit</button></div>
     </div>
   );
 }
@@ -341,7 +341,7 @@ function MatchPlayer({ pairs, onChange }: { pairs: MatchPair[]; onChange?: (pair
       </div>
       <div className="space-y-2">
         {right.map((r, i) => (
-          <div key={i} className="border rounded-xl p-2 text-center cursor-move bg-gray-100" draggable onDragStart={e => e.dataTransfer.setData('text/plain', r)}>{r}</div>
+          <div key={i} className="cursor-move rounded-xl border bg-gray-100 p-2 text-center" draggable onDragStart={e => e.dataTransfer.setData('text/plain', r)}>{r}</div>
         ))}
       </div>
     </div>
@@ -358,16 +358,16 @@ export default function QuizApp() {
   const [adapter] = useState<Adapter>(() => LocalAdapter());
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 text-gray-900 p-4 md:p-8">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 text-slate-900 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
-        <header className="flex items-center justify-between mb-6">
+        <header className="sticky top-0 z-30 mb-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">Quiz & Assessment</h1>
-            <div className="text-sm text-gray-600">Interactive quizzes with realtime, timer, leaderboard & export</div>
+            <h1 className="text-2xl md:text-3xl font-bold">vite+react+TS</h1>
+            <div className="text-sm text-slate-600">Interactive quizzes with realtime, timer, leaderboard & export</div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setRole("teacher")} className={`px-3 py-1.5 rounded-xl border ${role === 'teacher' ? 'bg-black text-white' : 'bg-white'}`}>Teacher</button>
-            <button onClick={() => setRole("student")} className={`px-3 py-1.5 rounded-xl border ${role === 'student' ? 'bg-black text-white' : 'bg-white'}`}>Student</button>
+            <button onClick={() => setRole("teacher")} className={`px-3 py-1.5 rounded-xl border transition-colors hover:bg-slate-50 ${role === 'teacher' ? 'bg-black text-white hover:bg-black' : 'bg-white'}`}>Teacher</button>
+            <button onClick={() => setRole("student")} className={`px-3 py-1.5 rounded-xl border transition-colors hover:bg-slate-50 ${role === 'student' ? 'bg-black text-white hover:bg-black' : 'bg-white'}`}>Student</button>
           </div>
         </header>
 
@@ -452,28 +452,28 @@ function TeacherView({ adapter }: { adapter: Adapter }) {
           </div>
           {quiz.questions.map(q => <QuestionEditor key={q.id} q={q} onChange={(nq: Question) => setQuiz(qz => ({ ...qz, questions: qz.questions.map(x => x.id === q.id ? nq : x) }))} onDelete={() => setQuiz(qz => ({ ...qz, questions: qz.questions.filter(x => x.id !== q.id) }))} />)}
           <div className="flex gap-2">
-            <button className="px-3 py-1.5 border rounded-xl" onClick={() => addQuestion("mcq")}>Add MCQ</button>
-            <button className="px-3 py-1.5 border rounded-xl" onClick={() => addQuestion("fib")}>Add Fill-in-Blank</button>
-            <button className="px-3 py-1.5 border rounded-xl" onClick={() => addQuestion("match")}>Add Match (Drag & Drop)</button>
+            <button className="rounded-xl border px-3 py-1.5 hover:bg-slate-50" onClick={() => addQuestion("mcq")}>Add MCQ</button>
+            <button className="rounded-xl border px-3 py-1.5 hover:bg-slate-50" onClick={() => addQuestion("fib")}>Add Fill-in-Blank</button>
+            <button className="rounded-xl border px-3 py-1.5 hover:bg-slate-50" onClick={() => addQuestion("match")}>Add Match (Drag & Drop)</button>
           </div>
         </Section>
 
         <Section title="Live Session">
           {!roomCode ? (
             <div className="flex items-center gap-3">
-              <button className="px-4 py-2 rounded-xl bg-black text-white" onClick={startSession}>Create Join Code</button>
+              <button className="rounded-xl bg-black px-4 py-2 text-white hover:opacity-90" onClick={startSession}>Create Join Code</button>
               <span className="text-sm text-gray-500">Create a room and share the code with students.</span>
             </div>
           ) : (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <div className="text-sm">Join Code:</div>
-                <div className="text-2xl font-mono bg-gray-900 text-white px-3 py-1 rounded">{roomCode}</div>
+                <div className="rounded bg-gray-900 px-3 py-1 font-mono text-2xl text-white">{roomCode}</div>
                 <Pill>Status: {state?.status}</Pill>
               </div>
 
               {state?.status === "lobby" && (
-                <button className="px-4 py-2 rounded-xl bg-emerald-600 text-white" onClick={startQuiz}>Start Quiz</button>
+                <button className="rounded-xl bg-emerald-600 px-4 py-2 text-white hover:opacity-90" onClick={startQuiz}>Start Quiz</button>
               )}
 
               {state?.status === "running" && (
@@ -484,8 +484,8 @@ function TeacherView({ adapter }: { adapter: Adapter }) {
                     <div className="mt-4 flex items-center justify-between"><Pill>Question {(state?.currentIndex || 0) + 1} / {quiz.questions.length}</Pill><button className="px-3 py-1.5 rounded-xl border" onClick={nextQuestion}>Next Question</button></div>
                   </div>
                   <div>
-                    <div className="text-sm font-medium mb-2">Answers Stream</div>
-                    <div className="h-64 overflow-auto border rounded-xl p-2 bg-gray-50">{(state?.answers || []).slice().reverse().map((a, idx) => {
+                    <div className="mb-2 text-sm font-medium">Answers Stream</div>
+                    <div className="h-64 overflow-auto rounded-xl border bg-gray-50 p-2">{(state?.answers || []).slice().reverse().map((a, idx) => {
                       const player = players.find(p => p.id === a.playerId);
                       return (<div key={idx} className="text-sm flex items-center justify-between"><span>{player?.name ?? a.playerId}</span><span>Q{a.qIndex+1}</span><span>{a.isCorrect ? "✓" : "✗"}</span></div>);
                     })}</div>
@@ -494,7 +494,7 @@ function TeacherView({ adapter }: { adapter: Adapter }) {
               )}
 
               {state?.status === "ended" && (
-                <div className="flex items-center gap-3"><button className="px-3 py-1.5 rounded-xl border" onClick={exportCSV}>Export CSV</button><button className="px-3 py-1.5 rounded-xl border" onClick={exportPDF}>Export PDF</button></div>
+                <div className="flex items-center gap-3"><button className="rounded-xl border px-3 py-1.5 hover:bg-slate-50" onClick={exportCSV}>Export CSV</button><button className="rounded-xl border px-3 py-1.5 hover:bg-slate-50" onClick={exportPDF}>Export PDF</button></div>
               )}
             </div>
           )}
@@ -558,9 +558,9 @@ function StudentView({ adapter }: { adapter: Adapter }) {
       {!joined ? (
         <Section title="Join Quiz">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input className="border rounded-xl p-2" placeholder="Join Code" value={roomCode} onChange={e => setRoomCode(e.target.value.trim())} />
-            <input className="border rounded-xl p-2" placeholder="Your Name" value={name} onChange={e => setName(e.target.value)} />
-            <button className="px-4 py-2 rounded-xl bg-black text-white" onClick={join}>Join</button>
+            <input className="rounded-xl border p-2 focus:outline-none focus:ring focus:ring-slate-300" placeholder="Join Code" value={roomCode} onChange={e => setRoomCode(e.target.value.trim())} />
+            <input className="rounded-xl border p-2 focus:outline-none focus:ring focus:ring-slate-300" placeholder="Your Name" value={name} onChange={e => setName(e.target.value)} />
+            <button className="rounded-xl bg-black px-4 py-2 text-white hover:opacity-90" onClick={join}>Join</button>
           </div>
         </Section>
       ) : (
