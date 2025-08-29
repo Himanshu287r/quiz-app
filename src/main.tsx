@@ -362,7 +362,7 @@ export default function QuizApp() {
       <div className="max-w-6xl mx-auto">
         <header className="sticky top-0 z-30 mb-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">vite+react+TS</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Quiz & Assessment</h1>
             <div className="text-sm text-slate-600">Interactive quizzes with realtime, timer, leaderboard & export</div>
           </div>
           <div className="flex items-center gap-2">
